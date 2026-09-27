@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Monitoring Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6fd1'/%3E%3Cpath d='M15 14.5 14.2 28h3.6L17 14.5z' fill='white'/%3E%3Ccircle cx='16' cy='12' r='1.9' fill='white'/%3E%3Cpath d='M16 12 15 3.5c-.1-.8 1.9-.8 1.9 0z M16 12l7.6 4c.7.4-.3 2-1 1.6z M16 12l-7.9 3.6c-.7.3-1.6-1.4-.9-1.7z' fill='white'/%3E%3C/svg%3E">
+<script src="/static/vendor/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --nav: #0b2e4f;
+  --nav-2: #16426b;
+  --nav-text: #c9d6e3;
+  --accent: #1f6fd1;
+  --accent-wash: #e8f1fc;
+  --page: #eef1f5;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --hover: #f1f5fa;
+  --border: #d9dfe7;
+  --text: #1b2430;
+  --text-2: #4b5766;
+  --muted: #7a8594;
+  --grid: #e8ecf1;
+  --axis: #c5ccd6;
+  /* Status colours: validated for colour-vision separation; amber is always paired with a label. */
+  --st-open: #2a78d6;
+  --st-processing: #e8a317;
+  --st-completed: #1f9d55;
+  --sev-info: #2a78d6;
+  --sev-warning: #eb6834;
+  --fresh: #fff4d6;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent); text-decoration: none; }
+
+/* ---------- Top navigation bar ---------- */
+.navbar { background: var(--nav); color: #fff; position: sticky; top: 0; z-index: 30; box-shadow: 0 1px 0 rgba(0,0,0,.2); }
+.navbar-inner { max-width: 1640px; margin: 0 auto; padding: 0 20px; height: 56px; display: flex; align-items: center; gap: 22px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; white-space: nowrap; }
+.logo svg { width: 30px; height: 30px; }
+.tabs { display: flex; height: 100%; gap: 2px; }
+.tabs a { display: flex; align-items: center; padding: 0 14px; color: var(--nav-text); font-size: 13.5px; font-weight: 500; border-bottom: 3px solid transparent; border-top: 3px solid transparent; }
+.tabs a:hover { color: #fff; background: var(--nav-2); }
+.tabs a.active { color: #fff; border-bottom-color: #4ea1ff; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.counter { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--nav-text); white-space: nowrap; }
+.counter b { min-width: 30px; height: 24px; padding: 0 7px; border-radius: 4px; display: inline-grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700; background: var(--c); }
+.counter.dark-num b { color: #1b2430; }
+.nav-sep { width: 1px; height: 26px; background: rgba(255,255,255,.15); margin: 0 4px; }
+.nav-btn { width: 34px; height: 34px; border-radius: 6px; border: 0; background: transparent; color: var(--nav-text); display: inline-grid; place-items: center; cursor: pointer; position: relative; }
+.nav-btn:hover { background: var(--nav-2); color: #fff; }
+.nav-btn[aria-pressed="true"] { color: #fff; }
+.nav-btn svg { width: 18px; height: 18px; }
+.nav-btn .bubble { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; border-radius: 8px; background: var(--sev-warning); color: #fff; font-size: 10px; font-weight: 700; display: none; place-items: center; padding: 0 4px; }
+.nav-btn .bubble.on { display: grid; }
+
+/* ---------- Sub bar ---------- */
+.subbar { background: var(--surface); border-bottom: 1px solid var(--border); }
+.subbar-inner { max-width: 1640px; margin: 0 auto; padding: 8px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 48px; }
+.crumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); flex-wrap: wrap; }
+.crumbs .sep { color: var(--axis); }
+.crumbs strong { color: var(--text); }
+.subbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.state { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); white-space: nowrap; }
+.state strong { color: var(--text); font-weight: 600; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.ok { background: var(--st-completed); animation: pulse 2s ease-in-out infinite; }
+.dot.off { background: var(--axis); }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(31,157,85,.45); } 50% { box-shadow: 0 0 0 5px rgba(31,157,85,0); } }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.segmented button { border: 0; border-left: 1px solid var(--border); background: var(--surface); padding: 5px 12px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.segmented button:first-child { border-left: 0; }
+.segmented button:hover { background: var(--hover); }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; font-weight: 600; }
+
+/* ---------- Layout ---------- */
+main { max-width: 1640px; margin: 0 auto; padding: 16px 20px 40px; }
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-4 { grid-column: span 4; }
+@media (max-width: 1200px) { .span-8, .span-4.side { grid-column: span 12; } .span-4 { grid-column: span 6; } }
+@media (max-width: 760px) { .span-8, .span-4 { grid-column: span 12; } }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; min-width: 0; display: flex; flex-direction: column; }
+.panel-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; min-height: 44px; }
+.panel-head h2 { font-size: 13.5px; font-weight: 650; margin: 0; }
+.panel-head .sub { font-size: 12px; color: var(--muted); }
+.panel-head .actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.panel-body { padding: 14px; flex: 1; min-width: 0; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 3px 10px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.btn:hover { background: var(--hover); color: var(--text); }
+.btn[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent); border-color: #b9d3f3; font-weight: 600; }
+
+/* ---------- Gauges ---------- */
+.gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.gauge { text-align: center; padding: 14px 10px 16px; border-left: 1px solid var(--grid); }
+.gauge:first-child { border-left: 0; }
+@media (max-width: 1000px) { .gauge:nth-child(3) { border-left: 0; } .gauge:nth-child(n+3) { border-top: 1px solid var(--grid); } }
+.gauge svg { width: 100%; max-width: 230px; height: auto; display: block; margin: 0 auto; }
+.gauge .g-value { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+.gauge .g-unit { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 3px; }
+.gauge .g-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.gauge .g-sub { font-size: 12px; color: var(--muted); }
+
+/* ---------- KPI sensors ---------- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--c); border-radius: 6px; padding: 11px 14px; }
+.kpi .label { font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.kpi .value { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 0; }
+.kpi .delta { font-size: 12px; color: var(--muted); }
+.kpi .delta b { color: var(--text-2); font-weight: 600; }
+
+/* ---------- Charts ---------- */
+.chart-box { position: relative; height: 290px; }
+.chart-box.short { height: 240px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; flex: none; }
+.donut-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: center; }
+.donut-wrap .chart-box { height: 220px; }
+.donut-legend { list-style: none; margin: 0; padding: 0; }
+.donut-legend li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.donut-legend li:last-child { border-bottom: 0; }
+.donut-legend .n { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.donut-legend .pct { width: 40px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .donut-wrap { grid-template-columns: 1fr; } }
+.panel .data-table { display: none; }
+.panel.show-table .data-table { display: block; }
+.panel.show-table .chart-view { display: none; }
+.empty { display: grid; place-items: center; min-height: 120px; color: var(--muted); font-size: 13px; text-align: center; padding: 16px; }
+
+/* ---------- Tables ---------- */
+.table-scroll { overflow: auto; max-height: 560px; border: 1px solid var(--grid); border-radius: 4px; }
+.data-table .table-scroll { max-height: 290px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-2); font-weight: 600; font-size: 12px; color: var(--text-2); z-index: 1; border-bottom: 1px solid var(--border); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:nth-child(even) { background: #fafbfc; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.fresh { animation: fresh 6s ease-out; }
+@keyframes fresh { 0%, 40% { background: var(--fresh); } 100% { background: transparent; } }
+td.wrap { white-space: normal; min-width: 170px; color: var(--text-2); }
+.doc-id { font-weight: 600; }
+.doc-name { display: block; font-size: 12px; color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.fix { display: block; font-size: 12px; color: #17613a; }
+.fix.pending { color: #a4480f; font-weight: 600; }
+.no-issue { color: var(--muted); }
+.id-cell { color: var(--muted); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.input { height: 32px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); padding: 0 10px; font: inherit; font-size: 13px; }
+.input.search { min-width: 220px; flex: 1; max-width: 360px; }
+.filter-tag { display: none; align-items: center; gap: 6px; font-size: 12.5px; background: var(--accent-wash); color: var(--accent); padding: 3px 6px 3px 10px; border-radius: 4px; }
+.filter-tag.on { display: inline-flex; }
+.filter-tag button { border: 0; background: transparent; cursor: pointer; color: inherit; font-size: 14px; line-height: 1; padding: 0 4px; }
+
+/* ---------- Status badge (square + label, colour never alone) ---------- */
+.badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.badge i { font-style: normal; width: 18px; height: 18px; border-radius: 3px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; background: var(--c); }
+.badge.dark-glyph i { color: #1b2430; }
+
+/* ---------- Key/value (database overview) ---------- */
+.kv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 32px; }
+@media (max-width: 900px) { .kv-grid { grid-template-columns: 1fr; } }
+.kv { width: 100%; font-size: 13px; }
+.kv tr.section:first-child td { padding-top: 2px; }
+.kv td { padding: 7px 4px; border-bottom: 1px solid var(--grid); white-space: normal; }
+.kv tr:last-child td { border-bottom: 0; }
+.kv td:first-child { color: var(--text-2); width: 44%; }
+.kv td:last-child { font-weight: 600; text-align: right; }
+.kv tr.section td { padding-top: 14px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; text-align: left; border-bottom: 1px solid var(--border); }
+
+/* ---------- Alerts log ---------- */
+.alert-list { list-style: none; margin: 0; padding: 0 2px 0 0; overflow: auto; max-height: 296px; }
+@media (max-width: 1200px) { .alert-list { max-height: 420px; } }
+.alert-item { border-left: 4px solid var(--c); padding: 9px 12px; border-bottom: 1px solid var(--grid); }
+.alert-item.unread { background: #f8fbff; }
+.alert-top { display: flex; align-items: center; gap: 8px; }
+.alert-title { font-weight: 650; font-size: 13px; margin: 5px 0 3px; }
+.alert-msg { margin: 0; font-size: 12.5px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; max-height: 130px; overflow: auto; }
+.alert-meta { display: flex; gap: 10px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.link-btn { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; font-weight: 600; }
+.link-btn:hover { text-decoration: underline; }
+.time { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+/* ---------- Toasts ---------- */
+.toasts { position: fixed; top: 112px; right: 18px; z-index: 50; display: flex; flex-direction: column; gap: 10px; width: min(390px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--c); border-radius: 6px; box-shadow: 0 10px 30px rgba(11, 46, 79, .18); padding: 11px 14px; animation: slide-in .25s ease-out; }
+.toast.leaving { animation: slide-out .2s ease-in forwards; }
+@keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
+@keyframes slide-out { to { transform: translateX(24px); opacity: 0; } }
+.toast-head { display: flex; align-items: center; gap: 8px; }
+.toast-kind { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.toast-close { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 17px; line-height: 1; padding: 2px 4px; }
+.toast-title { font-weight: 650; margin: 6px 0 2px; font-size: 13.5px; }
+.toast-body { font-size: 12.5px; color: var(--text-2); white-space: pre-wrap; max-height: 110px; overflow: hidden; }
+
+.banner { display: none; margin-bottom: 14px; padding: 10px 14px; border-radius: 6px; border: 1px solid #f3c9b5; background: #fff6f1; font-size: 13px; }
+.banner.on { display: block; }
+.anchor { scroll-margin-top: 120px; }
+@media (max-width: 900px) { .tabs { display: none; } .counter span.lbl { display: none; } }
+@media (max-width: 640px) { .navbar-inner, .subbar-inner, main { padding-left: 16px; padding-right: 16px; } .counter { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="navbar">
+  <div class="navbar-inner">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#1f6fd1"/><path d="M15 14.5 14.2 28h3.6L17 14.5z" fill="#fff"/><circle cx="16" cy="12" r="1.9" fill="#fff"/><path d="M16 12 15 3.5c-.1-.8 1.9-.8 1.9 0z" fill="#fff"/><path d="M16 12l7.6 4c.7.4-.3 2-1 1.6z" fill="#fff"/><path d="M16 12l-7.9 3.6c-.7.3-1.6-1.4-.9-1.7z" fill="#fff"/></svg>
+      DB Monitoring Agent
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Sections">
+      <a href="#overview" class="active">Overview</a>
+      <a href="#activity">Activity</a>
+      <a href="#alerts">Alerts</a>
+      <a href="#records">Records</a>
+      <a href="#database">Database</a>
+    </nav>
+    <div class="nav-right">
+      <span class="counter" style="--c:var(--st-open)" title="Turbines at foundation stage"><b id="cnt-open">–</b><span class="lbl">Open</span></span>
+      <span class="counter dark-num" style="--c:var(--st-processing)" title="Turbines being erected / connected"><b id="cnt-processing">–</b><span class="lbl">Processing</span></span>
+      <span class="counter" style="--c:var(--st-completed)" title="Turbines commissioned"><b id="cnt-completed">–</b><span class="lbl">Completed</span></span>
+      <span class="nav-sep"></span>
+      <button class="nav-btn" id="bell-btn" aria-label="Alerts" title="Alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="bubble" id="bell-bubble"></span></button>
+      <button class="nav-btn" id="notify-btn" aria-pressed="false" aria-label="Desktop notifications" title="Desktop notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg></button>
+      <button class="nav-btn" id="sound-btn" aria-pressed="true" aria-label="Alert sound" title="Alert sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path id="sound-wave" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button>
+    </div>
+  </div>
+</header>
+
+<div class="subbar">
+  <div class="subbar-inner">
+    <div class="crumbs" aria-label="Location">
+      <span>Home</span><span class="sep">›</span><span id="crumb-host">localhost</span><span class="sep">›</span><span id="crumb-db">workflow_db</span><span class="sep">›</span><strong>workflow_details</strong>
+    </div>
+    <div class="subbar-right">
+      <span class="state"><span class="dot" id="db-dot"></span>Database <strong id="db-text">Connecting…</strong></span>
+      <span class="state" id="agent-state"><span class="dot" id="agent-dot"></span>Agent <strong id="agent-text">–</strong></span>
+      <span class="state">Updated <strong id="updated-at">–</strong></span>
+      <div class="segmented" role="group" aria-label="Time range" id="range-group">
+        <button data-range="24h" aria-pressed="true">24 hours</button>
+        <button data-range="7d" aria-pressed="false">7 days</button>
+        <button data-range="30d" aria-pressed="false">30 days</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="banner" id="banner" role="alert"></div>
+
+  <section class="panel anchor" id="overview" style="margin-bottom:14px">
+    <div class="panel-head"><h2>Key metrics</h2><span class="sub" id="gauge-sub"></span></div>
+    <div class="gauges" id="gauges"></div>
+  </section>
+
+  <section class="kpis" id="kpis" aria-label="Totals for the selected range"></section>
+
+  <section class="grid">
+    <article class="panel span-8 anchor" id="activity">
+      <div class="panel-head"><h2>Processing activity</h2><span class="sub" id="timeline-sub">Events per hour, by status</span>
+        <div class="actions"><button class="btn" data-table-toggle aria-pressed="false">Table</button></div></div>
+      <div class="panel-body">
+        <div class="legend" id="timeline-legend"></div>
+        <div class="chart-view chart-box"><canvas id="timeline-chart" role="img" aria-label="Events over time by status"></canvas></div>
+        <div class="data-table"></div>
+      </div>
+    </article>
+
+    <article class="panel span-4 side anchor" id="alerts">
+      <div class="panel-head"><h2>Alerts</h2><span class="sub">from the monitoring agent</span>
+        <div class="actions" id="alert-filters" role="group" aria-label="Filter alerts">
+          <button class="btn" data-sev="ALL" aria-pressed="true">All</button>
+          <button class="btn" data-sev="INFO" aria-pressed="false">Info</button>
+          <button class="btn" data-sev="WARNING" aria-pressed="false">Warning</button>
+        </div></div>
+      <div class="panel-body" style="padding:0"><ul class="alert-list" id="alert-list" aria-live="polite"></ul></div>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="panel span-4" id="card-status">
+      <div class="panel-head"><h2>Current turbine status</h2>
+        <div class="actions"><button class="btn" data-table-toggle aria-pressed="false">Table</button></div></div>
+      <div class="panel-body">
+        <div class="chart-view donut-wrap">
+          <div class="chart-box"><canvas id="status-chart" role="img" aria-label="Current status of turbines"></canvas></div>
+          <ul class="donut-legend" id="status-legend"></ul>
+        </div>
+        <div class="data-table"></div>
+      </div>
+    </article>
+
+    <article class="panel span-4" id="card-processor">
+      <div class="panel-head"><h2>Installation progress by site</h2>
+        <div class="actions"><button class="btn" data-table-toggle aria-pressed="false">Table</button></div></div>
+      <div class="panel-body">
+        <div class="legend" id="processor-legend"></div>
+        <div class="chart-view chart-box short"><canvas id="processor-chart" role="img" aria-label="Turbines per wind farm by status"></canvas></div>
+        <div class="data-table"></div>
+      </div>
+    </article>
+
+    <article class="panel span-4" id="card-step">
+      <div class="panel-head"><h2>Events &amp; issues by phase</h2>
+        <div class="actions"><button class="btn" data-table-toggle aria-pressed="false">Table</button></div></div>
+      <div class="panel-body">
+        <div class="legend" id="step-legend"></div>
+        <div class="chart-view chart-box short"><canvas id="step-chart" role="img" aria-label="Events and issues by installation phase"></canvas></div>
+        <div class="data-table"></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="panel span-12 anchor" id="records">
+      <div class="panel-head"><h2>Live activity</h2><span class="sub">new rows are highlighted as they arrive</span></div>
+      <div class="panel-body">
+        <div class="toolbar">
+          <input class="input search" id="search" type="search" placeholder="Search turbine, site, location, phase, technician, issue…" aria-label="Search records">
+          <select class="input" id="status-filter" aria-label="Filter by status"><option value="">All statuses</option></select>
+          <span class="filter-tag" id="id-filter-tag"><span id="id-filter-text"></span><button id="id-filter-clear" aria-label="Clear record filter">×</button></span>
+          <span style="margin-left:auto;font-size:12.5px;color:var(--muted)" id="row-count"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th class="num">ID</th><th>Recorded at</th><th>Turbine</th><th>Site / location</th><th>Phase</th><th>Technician</th><th>Status</th><th>Issue &amp; fix</th><th>Work notes</th></tr></thead>
+            <tbody id="activity-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="panel span-12 anchor" id="database">
+      <div class="panel-head"><h2>Database overview</h2><span class="sub">MySQL server, monitored table and monitoring agent</span></div>
+      <div class="panel-body"><div class="kv-grid" id="db-info"></div></div>
+    </article>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" aria-live="assertive"></div>
+
+<script>
+"use strict";
+
+const STATUS_ORDER = ["OPEN", "PROCESSING", "COMPLETED"];
+const STATUS = {
+  OPEN:       { label: "Open",       token: "--st-open",       icon: "O" },
+  PROCESSING: { label: "Processing", token: "--st-processing", icon: "P", darkGlyph: true },
+  COMPLETED:  { label: "Completed",  token: "--st-completed",  icon: "✓" },
+};
+const SEVERITY = {
+  INFO:    { label: "Info",    token: "--sev-info",    icon: "i" },
+  WARNING: { label: "Warning", token: "--sev-warning", icon: "!" },
+};
+const RANGE_LABEL = { "24h": "previous 24 h", "7d": "previous 7 days", "30d": "previous 30 days" };
+const RANGE_MS = { "24h": 864e5, "7d": 7 * 864e5, "30d": 30 * 864e5 };
+const POLL_MS = 3000, SNAPSHOT_MS = 20000;
+
+const state = {
+  range: "24h", lastId: null, lastAlert: 0, records: [], alerts: [], snap: null,
+  fresh: new Set(), unread: new Set(), charts: {},
+  q: "", statusFilter: "", idRange: null, alertSev: "ALL",
+  sound: true, notify: false, connected: null, snapTimer: null,
+};
+
+// ---------- helpers ----------
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const css = (t) => getComputedStyle(document.documentElement).getPropertyValue(t).trim();
+const num = (n) => Number(n || 0).toLocaleString();
+const parseTime = (s) => (s ? new Date(String(s).replace(" ", "T")) : null);
+function fmtTime(s) {
+  const d = parseTime(s); if (!d || isNaN(d)) return "–";
+  return new Date().toDateString() === d.toDateString()
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function ago(s) {
+  const d = parseTime(s); if (!d || isNaN(d)) return "";
+  const sec = Math.max(0, Math.round((Date.now() - d) / 1000));
+  if (sec < 45) return "just now";
+  if (sec < 3600) return `${Math.round(sec / 60)} min ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)} h ago`;
+  return `${Math.round(sec / 86400)} d ago`;
+}
+function duration(min) {
+  if (min == null) return "–";
+  min = Math.round(min);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return h < 24 ? `${h} h ${m} min` : `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+function bytes(n) { return n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+function niceCeil(n) {
+  if (n <= 0) return 1;
+  const p = 10 ** Math.floor(Math.log10(n));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((v) => v >= n);
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+function badge(meta, text) {
+  return `<span class="badge${meta.darkGlyph ? " dark-glyph" : ""}" style="--c:var(${meta.token})"><i aria-hidden="true">${meta.icon}</i>${esc(text ?? meta.label)}</span>`;
+}
+const statusBadge = (s) => badge(STATUS[s] || { label: s, token: "--muted", icon: "?" });
+async function api(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+
+// ---------- header state ----------
+function setConnection(ok, message) {
+  state.connected = ok;
+  $("db-dot").className = "dot " + (ok ? "ok" : "off");
+  $("db-text").textContent = ok ? "Online" : "Unreachable";
+  $("banner").classList.toggle("on", !ok);
+  $("banner").textContent = ok ? "" : `Cannot reach the dashboard API or database (${message}). Retrying…`;
+}
+function renderAgent(agent) {
+  const online = agent && agent.online;
+  $("agent-dot").className = "dot " + (online ? "ok" : "off");
+  $("agent-text").textContent = online ? (agent.model || "rule-based") : "Stopped";
+  $("agent-state").title = agent && agent.last_check ? `Last check: ${fmtTime(agent.last_check)}` : "monitor_agent.py is not running";
+}
+function renderCounters(rows) {
+  const c = Object.fromEntries(rows.map((r) => [r.status, r.n]));
+  $("cnt-open").textContent = num(c.OPEN);
+  $("cnt-processing").textContent = num(c.PROCESSING);
+  $("cnt-completed").textContent = num(c.COMPLETED);
+}
+
+// ---------- gauges ----------
+function gaugeSvg(value, max, color) {
+  const frac = value == null ? 0 : Math.max(0, Math.min(1, value / max));
+  const P = (ang, r) => [100 + r * Math.cos(ang), 104 - r * Math.sin(ang)].map((v) => v.toFixed(2));
+  const R = 78, a = Math.PI * (1 - frac);
+  const [x0, y0] = P(Math.PI, R), [x1, y1] = P(0, R), [xv, yv] = P(a, R), [nx, ny] = P(a, 60);
+  let ticks = "";
+  for (let i = 0; i <= 10; i++) {
+    const t = Math.PI * (1 - i / 10), [ax, ay] = P(t, 90), [bx, by] = P(t, i % 5 ? 94 : 97);
+    ticks += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${css("--axis")}" stroke-width="${i % 5 ? 1 : 1.6}"/>`;
+  }
+  return `<svg viewBox="0 0 200 122" aria-hidden="true">
+    ${ticks}
+    <path d="M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1}" fill="none" stroke="${css("--grid")}" stroke-width="16"/>
+    ${frac > 0 ? `<path d="M${x0} ${y0} A${R} ${R} 0 0 1 ${xv} ${yv}" fill="none" stroke="${color}" stroke-width="16"/>` : ""}
+    <line x1="100" y1="104" x2="${nx}" y2="${ny}" stroke="${css("--nav")}" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="100" cy="104" r="7" fill="${css("--nav")}"/><circle cx="100" cy="104" r="2.5" fill="#fff"/>
+    <text x="${x0}" y="120" text-anchor="middle" font-size="10" fill="${css("--muted")}">0</text>
+    <text x="${x1}" y="120" text-anchor="middle" font-size="10" fill="${css("--muted")}">${esc(max.toLocaleString())}</text>
+  </svg>`;
+}
+function renderGauges(g, timeline) {
+  const hourlyPeak = timeline.unit === "hour"
+    ? Math.max(0, ...timeline.buckets.map((b) => Object.values(timeline.series[b] || {}).reduce((a, c) => a + c, 0))) : 0;
+  const inst = g.avg_install_minutes;
+  const items = [
+    { label: "Issue fix rate", value: g.fix_rate, max: 100,
+      text: g.fix_rate == null ? "–" : g.fix_rate.toFixed(0), unit: "%",
+      sub: `${num(g.issues_fixed)} of ${num(g.issues_reported)} site issues fixed`, color: css("--st-completed") },
+    { label: "Events · last hour", value: g.events_last_hour, max: niceCeil(Math.max(10, hourlyPeak, g.events_last_hour * 1.25)),
+      text: num(g.events_last_hour), unit: "events", sub: `peak ${num(hourlyPeak)} / hour in the last 24 h`, color: css("--accent") },
+    { label: "Avg. installation time", value: inst == null ? null : inst / 60, max: niceCeil(Math.max(24, (inst || 0) / 60 * 1.5)),
+      text: inst == null ? "–" : duration(inst), unit: "", sub: `foundation → commissioning, ${num(g.commissioned)} turbines`, color: css("--st-open") },
+    { label: "DB response time", value: g.db_response_ms, max: niceCeil(Math.max(20, g.db_response_ms * 1.5)),
+      text: g.db_response_ms.toFixed(1), unit: "ms", sub: "COUNT(*) round trip from the dashboard", color: css("--st-completed") },
+  ];
+  $("gauges").innerHTML = items.map((i) => `
+    <div class="gauge">${gaugeSvg(i.value, i.max, i.color)}
+      <div class="g-value">${esc(i.text)}<span class="g-unit">${esc(i.unit)}</span></div>
+      <div class="g-label">${esc(i.label)}</div><div class="g-sub">${esc(i.sub)}</div></div>`).join("");
+  $("gauge-sub").textContent = `· ${RANGE_LABEL[state.range].replace("previous", "last")}`;
+}
+
+// ---------- KPI sensors ----------
+function renderKpis(k) {
+  const cur = k.current, prev = k.previous, since = RANGE_LABEL[state.range];
+  const delta = (now, before) => {
+    if (!before) return now ? `new vs ${since}` : `no change vs ${since}`;
+    const d = Math.round(100 * (now - before) / before);
+    return d === 0 ? `no change vs ${since}` : `<b>${d > 0 ? "▲" : "▼"} ${Math.abs(d)}%</b> vs ${since}`;
+  };
+  const rangeAlerts = state.alerts.filter((a) => parseTime(a.time) >= new Date(Date.now() - RANGE_MS[state.range]));
+  const tiles = [
+    { label: "Events", value: cur.events, delta: delta(cur.events, prev.events), token: "--accent" },
+    { label: "Turbines started", value: cur.opened, delta: delta(cur.opened, prev.opened), token: "--st-open" },
+    { label: "Phases in progress", value: cur.processing, delta: delta(cur.processing, prev.processing), token: "--st-processing" },
+    { label: "Completed", value: cur.completed, delta: delta(cur.completed, prev.completed), token: "--st-completed" },
+    { label: "Issues reported", value: cur.issues, delta: delta(cur.issues, prev.issues), token: "--sev-warning" },
+    { label: "Issues fixed", value: cur.fixed, delta: `${num(cur.issues - cur.fixed)} still being worked on`, token: "--st-completed" },
+    { label: "Agent alerts", value: rangeAlerts.length, delta: `${rangeAlerts.filter((a) => a.severity === "WARNING").length} warnings in range`, token: "--nav" },
+  ];
+  $("kpis").innerHTML = tiles.map((t) => `<div class="kpi" style="--c:var(${t.token})"><div class="label">${t.label}</div>
+    <div class="value">${num(t.value)}</div><div class="delta">${t.delta}</div></div>`).join("");
+}
+
+// ---------- charts ----------
+function baseOptions() {
+  const muted = css("--muted");
+  return {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: "#ffffff", titleColor: css("--text"), bodyColor: css("--text"), footerColor: css("--text"),
+        borderColor: css("--border"), borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+        titleFont: { weight: "600" }, footerFont: { weight: "600" },
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: css("--axis") }, ticks: { color: muted, font: { size: 11 } } },
+      y: { beginAtZero: true, grid: { color: css("--grid") }, border: { display: false }, ticks: { color: muted, font: { size: 11 }, precision: 0 } },
+    },
+  };
+}
+function upsertChart(key, canvasId, config) {
+  const c = state.charts[key];
+  if (c && c.config.type === config.type) {
+    c.data.labels = config.data.labels; c.data.datasets = config.data.datasets; c.options = config.options; c.update();
+    return;
+  }
+  if (c) c.destroy();
+  state.charts[key] = new Chart($(canvasId), config);
+}
+const legendHtml = (items) => items.map((i) => `<span><span class="swatch" style="background:var(${i.token})"></span>${esc(i.label)}</span>`).join("");
+function setTable(panelId, columns, rows) {
+  $(panelId).querySelector(".data-table").innerHTML = `<div class="table-scroll"><table><thead><tr>${
+    columns.map((c, i) => `<th class="${i ? "num" : ""}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${
+    rows.map((r) => `<tr>${r.map((v, i) => `<td class="${i ? "num" : ""}">${esc(i ? num(v) : v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderTimeline(t) {
+  const hourly = t.unit === "hour";
+  $("timeline-sub").textContent = `Events per ${hourly ? "hour" : "day"}, by status`;
+  const labels = t.buckets.map((b) => {
+    const d = parseTime(hourly ? b + ":00" : b + " 00:00:00");
+    return hourly ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString([], { month: "short", day: "numeric" });
+  });
+  const datasets = STATUS_ORDER.map((s) => {
+    const color = css(STATUS[s].token);
+    return {
+      label: STATUS[s].label, data: t.buckets.map((b) => (t.series[b] || {})[s] || 0),
+      borderColor: color, backgroundColor: color + "1f", fill: true, borderWidth: 2, cubicInterpolationMode: "monotone",
+      pointRadius: 0, pointHoverRadius: 5, pointHoverBorderColor: "#fff", pointHoverBorderWidth: 2, pointBackgroundColor: color,
+    };
+  });
+  $("timeline-legend").innerHTML = legendHtml(STATUS_ORDER.map((s) => STATUS[s]));
+  const opts = baseOptions();
+  opts.scales.x.ticks.maxRotation = 0; opts.scales.x.ticks.autoSkipPadding = 14;
+  opts.scales.x.grid = { display: true, color: css("--grid"), drawTicks: false };
+  opts.interaction = { mode: "index", intersect: false };
+  opts.plugins.tooltip.callbacks = {
+    title: (items) => { const b = t.buckets[items[0].dataIndex]; return hourly ? `${b}:00` : b; },
+    footer: (items) => `Total: ${items.reduce((s, i) => s + i.raw, 0)}`,
+  };
+  upsertChart("timeline", "timeline-chart", { type: "line", data: { labels, datasets }, options: opts, plugins: [crosshair] });
+  setTable("activity", ["Period", ...STATUS_ORDER.map((s) => STATUS[s].label), "Total"],
+    t.buckets.map((b, i) => { const v = datasets.map((d) => d.data[i]); return [hourly ? `${b}:00` : b, ...v, v.reduce((a, c) => a + c, 0)]; })
+      .filter((r) => r[r.length - 1] > 0).reverse());
+}
+const crosshair = {
+  id: "crosshair",
+  afterDatasetsDraw(chart) {
+    const active = chart.tooltip && chart.tooltip.getActiveElements();
+    if (!active || !active.length) return;
+    const x = active[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+    ctx.save(); ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.restore();
+  },
+};
+const centerText = {
+  id: "centerText",
+  afterDraw(chart, _a, opts) {
+    const { ctx, chartArea: a } = chart; if (!a) return;
+    const x = (a.left + a.right) / 2, y = (a.top + a.bottom) / 2;
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = css("--text"); ctx.font = '700 26px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.fillText(opts.value, x, y - 8);
+    ctx.fillStyle = css("--muted"); ctx.font = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.fillText(opts.caption, x, y + 14); ctx.restore();
+  },
+};
+function renderStatus(rows) {
+  const counts = Object.fromEntries(rows.map((r) => [r.status, r.n]));
+  const present = STATUS_ORDER.filter((s) => counts[s]);
+  const total = present.reduce((a, s) => a + counts[s], 0);
+  const opts = baseOptions(); delete opts.scales;
+  opts.cutout = "68%";
+  opts.plugins.centerText = { value: num(total), caption: "turbines" };
+  opts.plugins.tooltip.callbacks = { label: (i) => ` ${i.label}: ${i.raw} (${Math.round(100 * i.raw / total)}%)` };
+  upsertChart("status", "status-chart", {
+    type: "doughnut",
+    data: { labels: present.map((s) => STATUS[s].label), datasets: [{
+      data: present.map((s) => counts[s]), backgroundColor: present.map((s) => css(STATUS[s].token)),
+      borderColor: "#ffffff", borderWidth: 2, hoverOffset: 4,
+    }] },
+    options: opts, plugins: [centerText],
+  });
+  $("status-legend").innerHTML = STATUS_ORDER.map((s) => `<li>${statusBadge(s)}<span class="n">${num(counts[s])}</span>
+    <span class="pct">${total ? Math.round(100 * (counts[s] || 0) / total) : 0}%</span></li>`).join("");
+  setTable("card-status", ["Status", "Turbines"], STATUS_ORDER.map((s) => [STATUS[s].label, counts[s] || 0]));
+}
+function renderSite(rows) {
+  const series = [
+    { key: "opened", label: "Open", token: "--st-open" },
+    { key: "processing", label: "Processing", token: "--st-processing" },
+    { key: "completed", label: "Completed", token: "--st-completed" },
+  ];
+  $("processor-legend").innerHTML = legendHtml(series);
+  const opts = baseOptions();
+  opts.indexAxis = "y";
+  [opts.scales.x, opts.scales.y] = [opts.scales.y, opts.scales.x];
+  opts.scales.x.stacked = true; opts.scales.y.stacked = true;
+  opts.scales.y.ticks = { color: css("--text-2"), font: { size: 11.5 },
+    callback: function (v) { const l = this.getLabelForValue(v); return l.replace(/ (Wind )?(Park|Farm|Project)$/, ""); } };
+  opts.interaction = { mode: "index", intersect: false, axis: "y" };
+  opts.plugins.tooltip.filter = (i) => i.raw > 0;
+  opts.plugins.tooltip.callbacks = {
+    title: (items) => `${rows[items[0].dataIndex].site_name} · ${rows[items[0].dataIndex].location}`,
+    footer: (items) => `Turbines: ${rows[items[0].dataIndex].total}`,
+  };
+  upsertChart("processor", "processor-chart", {
+    type: "bar",
+    data: { labels: rows.map((r) => r.site_name), datasets: series.map((s, idx) => ({
+      label: s.label, data: rows.map((r) => r[s.key]), backgroundColor: css(s.token),
+      borderColor: "#ffffff", borderWidth: { left: idx ? 2 : 0, right: 0, top: 0, bottom: 0 }, borderSkipped: false,
+      maxBarThickness: 18, categoryPercentage: 0.7,
+    })) },
+    options: opts,
+  });
+  setTable("card-processor", ["Wind farm", "Open", "Processing", "Completed", "Turbines"],
+    rows.map((r) => [`${r.site_name} (${r.location})`, r.opened, r.processing, r.completed, r.total]));
+}
+function renderStep(rows) {
+  const series = [{ key: "total", label: "Events", token: "--accent" }, { key: "issues", label: "Issues reported", token: "--sev-warning" }];
+  $("step-legend").innerHTML = legendHtml(series);
+  const opts = baseOptions();
+  opts.indexAxis = "y";
+  [opts.scales.x, opts.scales.y] = [opts.scales.y, opts.scales.x];
+  opts.scales.y.ticks = { color: css("--text-2"), font: { size: 11.5 },
+    callback: function (v) { return this.getLabelForValue(v).replace(" Installation", "").replace(" & Grid Connection", " & Grid"); } };
+  opts.interaction = { mode: "index", intersect: false, axis: "y" };
+  opts.plugins.tooltip.callbacks = { afterBody: (items) => { const r = rows[items[0].dataIndex]; return `Fixed: ${r.fixed} of ${r.issues} issues`; } };
+  upsertChart("step", "step-chart", {
+    type: "bar",
+    data: { labels: rows.map((r) => r.installation_phase), datasets: series.map((sr) => ({
+      label: sr.label, data: rows.map((r) => r[sr.key]), backgroundColor: css(sr.token),
+      borderRadius: { topRight: 3, bottomRight: 3 }, borderSkipped: false, maxBarThickness: 12, categoryPercentage: 0.75, barPercentage: 0.9,
+    })) },
+    options: opts,
+  });
+  setTable("card-step", ["Installation phase", "Events", "Issues reported", "Issues fixed"], rows.map((r) => [r.installation_phase, r.total, r.issues, r.fixed]));
+}
+function renderCharts() {
+  const s = state.snap; if (!s || typeof Chart === "undefined") return;
+  renderTimeline(s.timeline); renderStatus(s.current_status); renderSite(s.by_site); renderStep(s.by_phase);
+}
+
+// ---------- database overview ----------
+function renderDbInfo(db, g, agent) {
+  const up = db.uptime_seconds, uptime = up >= 86400 ? `${Math.floor(up / 86400)} d ${Math.floor(up % 86400 / 3600)} h`
+    : `${Math.floor(up / 3600)} h ${Math.floor(up % 3600 / 60)} min`;
+  const row = (k, v) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`;
+  const online = (ok, text) => `<span class="badge" style="--c:var(${ok ? "--st-completed" : "--muted"})"><i>${ok ? "✓" : "–"}</i>${esc(text)}</span>`;
+  const section = (title, rows) => `<table class="kv"><tr class="section"><td colspan="2">${esc(title)}</td></tr>${rows.join("")}</table>`;
+  $("db-info").innerHTML = [
+    section("MySQL server", [
+      row("Status", online(state.connected, state.connected ? "Online" : "Unreachable")),
+      row("Host", esc(db.host)), row("Version", `MySQL ${esc(db.version)}`), row("Uptime", uptime),
+      row("Connections", num(db.threads_connected)), row("Response time", `${g.db_response_ms.toFixed(1)} ms`)]),
+    section("Monitored table", [
+      row("Database", esc(db.database)), row("Table", esc(db.table)), row("Rows", num(db.rows)),
+      row("Turbines", num(db.turbines)), row("Wind farms", num(db.sites)), row("Size on disk", bytes(db.size_bytes))]),
+    section("Monitoring agent", [
+      row("Status", online(agent && agent.online, agent && agent.online ? "Running" : "Stopped")),
+      row("Model", esc(agent && agent.model ? `Ollama · ${agent.model}` : "rule-based")),
+      row("Last check", esc(agent && agent.last_check ? fmtTime(agent.last_check) : "–")),
+      row("Checks every", agent && agent.poll_interval ? `${agent.poll_interval} s` : "–")]),
+  ].join("");
+  $("crumb-host").textContent = db.host; $("crumb-db").textContent = db.database;
+}
+
+// ---------- activity table ----------
+function renderActivity() {
+  const q = state.q.toLowerCase();
+  const rows = state.records.filter((r) => {
+    if (state.statusFilter && r.status !== state.statusFilter) return false;
+    if (state.idRange && (r.id < state.idRange[0] || r.id > state.idRange[1])) return false;
+    return !q || [r.turbine_id, r.turbine_model, r.site_name, r.location, r.installation_phase, r.technician, r.status, r.notes, r.issue, r.fix_applied]
+      .some((v) => String(v ?? "").toLowerCase().includes(q));
+  });
+  $("row-count").textContent = `${rows.length} of ${state.records.length} records`;
+  $("activity-body").innerHTML = rows.length ? rows.map((r) => `
+    <tr class="${state.fresh.has(r.id) ? "fresh" : ""}">
+      <td class="num id-cell">${r.id}</td>
+      <td title="${esc(r.processed_at)}">${esc(fmtTime(r.processed_at))}</td>
+      <td><span class="doc-id">${esc(r.turbine_id)}</span><span class="doc-name">${esc(r.turbine_model)}</span></td>
+      <td><span class="doc-id" style="font-weight:500">${esc(r.site_name)}</span><span class="doc-name" title="${esc(r.location)}">${esc(r.location)}</span></td>
+      <td>${esc(r.installation_phase)}</td><td>${esc(r.technician)}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td class="wrap">${r.issue ? `${esc(r.issue)}<span class="fix${r.fix_applied ? "" : " pending"}">${r.fix_applied ? "✓ Fixed: " + esc(r.fix_applied) : "Not fixed yet"}</span>` : `<span class="no-issue">No issues</span>`}</td>
+      <td class="wrap">${esc(r.notes || "")}</td>
+    </tr>`).join("") : `<tr><td colspan="9"><div class="empty">No records match the current filters.</div></td></tr>`;
+  $("id-filter-tag").classList.toggle("on", !!state.idRange);
+  if (state.idRange) $("id-filter-text").textContent = state.idRange[0] === state.idRange[1] ? `Record #${state.idRange[0]}` : `Records #${state.idRange[0]}–${state.idRange[1]}`;
+}
+
+// ---------- alerts ----------
+function renderAlerts() {
+  const list = state.alerts.filter((a) => state.alertSev === "ALL" || a.severity === state.alertSev);
+  $("alert-list").innerHTML = list.length ? list.map((a) => {
+    const sev = SEVERITY[a.severity] || SEVERITY.INFO;
+    const range = a.first_id === a.last_id ? `Record #${a.first_id}` : `Records #${a.first_id}–${a.last_id}`;
+    const src = (a.source || "").startsWith("ollama:") ? `AI agent · ${a.source.slice(7)}` : "Rule-based";
+    return `<li class="alert-item${state.unread.has(a.seq) ? " unread" : ""}" style="--c:var(${sev.token})">
+      <div class="alert-top">${badge(sev)}<span class="time" title="${esc(a.time)}">${esc(ago(a.time))}</span></div>
+      <div class="alert-title">${esc(a.title)}</div><p class="alert-msg">${esc(a.message)}</p>
+      <div class="alert-meta"><button class="link-btn" data-ids="${a.first_id},${a.last_id}">${range}</button><span>${esc(src)}</span></div>
+    </li>`;
+  }).join("") : `<li><div class="empty">${state.alerts.length ? "No alerts with this severity." : "No alerts yet.<br>The agent posts here when new records arrive."}</div></li>`;
+  $("bell-bubble").textContent = state.unread.size;
+  $("bell-bubble").classList.toggle("on", state.unread.size > 0);
+}
+function markRead() {
+  if (!state.unread.size) return;
+  state.unread.clear(); document.title = "DB Monitoring Agent"; renderAlerts();
+}
+
+// ---------- toasts, sound, notifications ----------
+function toast({ kind, meta, title, body, sticky = false, onClick }) {
+  const box = $("toasts");
+  while (box.children.length >= 5) box.firstElementChild.remove();
+  const el = document.createElement("div");
+  el.className = "toast"; el.style.setProperty("--c", `var(${meta.token})`);
+  el.innerHTML = `<div class="toast-head">${badge(meta)}<span class="toast-kind">${esc(kind)}</span><button class="toast-close" aria-label="Dismiss">×</button></div>
+    <div class="toast-title">${esc(title)}</div>${body ? `<div class="toast-body">${esc(body)}</div>` : ""}`;
+  const close = () => { el.classList.add("leaving"); setTimeout(() => el.remove(), 200); };
+  el.querySelector(".toast-close").onclick = (e) => { e.stopPropagation(); close(); };
+  if (onClick) { el.style.cursor = "pointer"; el.onclick = () => { onClick(); close(); }; }
+  box.appendChild(el);
+  if (!sticky) setTimeout(close, kind === "New record" ? 7000 : 15000);
+}
+let audioCtx = null;
+function beep(strong) {
+  if (!state.sound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    (strong ? [880, 660, 880] : [740]).forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t0 = audioCtx.currentTime + i * 0.18;
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g).connect(audioCtx.destination); o.start(t0); o.stop(t0 + 0.17);
+    });
+  } catch {}
+}
+function desktopNotify(title, body) {
+  if (!state.notify || !("Notification" in window) || Notification.permission !== "granted") return;
+  try { new Notification(title, { body }); } catch {}
+}
+function focusRecords(a, b) {
+  state.idRange = [a, b]; state.q = ""; state.statusFilter = "";
+  $("search").value = ""; $("status-filter").value = "";
+  renderActivity(); $("records").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------- data flow ----------
+function mergeRecords(incoming, current) {
+  const byId = new Map(incoming.map((r) => [r.id, r]));
+  current.forEach((r) => { if (!byId.has(r.id)) byId.set(r.id, r); });
+  return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, 300);
+}
+async function loadSnapshot() {
+  try {
+    const s = await api(`/api/snapshot?range=${state.range}`);
+    state.snap = s;
+    if (state.lastId === null) { state.lastId = s.max_id; state.lastAlert = s.alert_count; state.alerts = s.alerts.slice().reverse(); }
+    state.records = mergeRecords(s.recent, state.records);
+    setConnection(true); renderAgent(s.agent); renderCounters(s.current_status);
+    renderGauges(s.gauges, s.timeline); renderKpis(s.kpis); renderCharts();
+    renderDbInfo(s.db, s.gauges, s.agent); renderActivity(); renderAlerts();
+    $("updated-at").textContent = fmtTime(s.generated_at);
+  } catch (e) { setConnection(false, e.message); }
+}
+function scheduleSnapshot() { clearTimeout(state.snapTimer); state.snapTimer = setTimeout(loadSnapshot, 600); }
+async function poll() {
+  if (state.lastId === null) return;
+  try {
+    const u = await api(`/api/updates?after_id=${state.lastId}&after_alert=${state.lastAlert}`);
+    if (!state.connected) setConnection(true);
+    renderAgent(u.agent);
+    $("updated-at").textContent = fmtTime(u.server_time);
+
+    if (u.new_records.length) {
+      u.new_records.forEach((r) => state.fresh.add(r.id));
+      state.lastId = Math.max(state.lastId, ...u.new_records.map((r) => r.id));
+      state.records = mergeRecords(u.new_records, state.records);
+      renderActivity();
+      const shown = u.new_records.slice(-3);
+      shown.forEach((r) => toast({
+        kind: "New record", meta: STATUS[r.status] || SEVERITY.INFO,
+        title: `#${r.id} · ${r.turbine_id} · ${r.installation_phase}`,
+        body: `${r.site_name} · ${r.technician} → ${(STATUS[r.status] || {}).label || r.status}${r.issue ? `\nIssue: ${r.issue}${r.fix_applied ? ` (fixed: ${r.fix_applied})` : " (not fixed yet)"}` : ""}`,
+        onClick: () => focusRecords(r.id, r.id),
+      }));
+      if (u.new_records.length > shown.length) toast({ kind: "New records", meta: SEVERITY.INFO, title: `+${u.new_records.length - shown.length} more new records` });
+      beep(false); scheduleSnapshot();
+      setTimeout(() => u.new_records.forEach((r) => state.fresh.delete(r.id)), 7000);
+    }
+
+    if (u.alert_count < state.lastAlert) state.lastAlert = u.alert_count;
+    if (u.new_alerts.length) {
+      state.lastAlert = u.alert_count;
+      u.new_alerts.forEach((a) => {
+        state.alerts.unshift(a); state.unread.add(a.seq);
+        const sev = SEVERITY[a.severity] || SEVERITY.INFO;
+        toast({ kind: "Agent alert", meta: sev, title: a.title, body: a.message, sticky: a.severity === "WARNING",
+                onClick: () => focusRecords(a.first_id, a.last_id) });
+        beep(a.severity === "WARNING");
+        desktopNotify(`[${sev.label}] ${a.title}`, a.message);
+      });
+      state.alerts = state.alerts.slice(0, 200);
+      if (document.hidden) document.title = `(${state.unread.size}) DB Monitoring Agent`;
+      renderAlerts();
+      if (state.snap) renderKpis(state.snap.kpis);
+    }
+  } catch (e) { setConnection(false, e.message); }
+}
+
+// ---------- controls ----------
+function initControls() {
+  $("status-filter").innerHTML += STATUS_ORDER.map((s) => `<option value="${s}">${STATUS[s].label}</option>`).join("");
+  const savedRange = store.get("dbm.range", "24h");
+  if (RANGE_LABEL[savedRange]) state.range = savedRange;
+  $("range-group").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.range === state.range)));
+  $("range-group").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-range]"); if (!b) return;
+    state.range = b.dataset.range; store.set("dbm.range", state.range);
+    $("range-group").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    loadSnapshot();
+  });
+  $("tabs").addEventListener("click", (e) => {
+    const a = e.target.closest("a"); if (!a) return;
+    $("tabs").querySelectorAll("a").forEach((x) => x.classList.toggle("active", x === a));
+  });
+  $("alert-filters").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-sev]"); if (!b) return;
+    state.alertSev = b.dataset.sev;
+    $("alert-filters").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    renderAlerts();
+  });
+  $("alert-list").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-ids]"); if (!b) return;
+    const [a, z] = b.dataset.ids.split(",").map(Number); focusRecords(a, z);
+  });
+  $("alerts").addEventListener("pointerenter", markRead);
+  $("bell-btn").addEventListener("click", () => { $("alerts").scrollIntoView({ behavior: "smooth", block: "start" }); markRead(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) document.title = "DB Monitoring Agent"; });
+  document.querySelectorAll("[data-table-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+    const panel = btn.closest(".panel"), on = !panel.classList.contains("show-table");
+    panel.classList.toggle("show-table", on); btn.setAttribute("aria-pressed", String(on)); btn.textContent = on ? "Chart" : "Table";
+  }));
+  $("search").addEventListener("input", (e) => { state.q = e.target.value; renderActivity(); });
+  $("status-filter").addEventListener("change", (e) => { state.statusFilter = e.target.value; renderActivity(); });
+  $("id-filter-clear").addEventListener("click", () => { state.idRange = null; renderActivity(); });
+
+  state.sound = store.get("dbm.sound", true);
+  const syncSound = () => { $("sound-btn").setAttribute("aria-pressed", String(state.sound)); $("sound-wave").style.display = state.sound ? "" : "none"; };
+  syncSound();
+  $("sound-btn").addEventListener("click", () => { state.sound = !state.sound; store.set("dbm.sound", state.sound); syncSound(); if (state.sound) beep(false); });
+
+  state.notify = store.get("dbm.notify", false) && "Notification" in window && Notification.permission === "granted";
+  $("notify-btn").setAttribute("aria-pressed", String(state.notify));
+  $("notify-btn").addEventListener("click", async () => {
+    if (!("Notification" in window)) return toast({ kind: "Notifications", meta: SEVERITY.INFO, title: "This browser does not support desktop notifications" });
+    if (!state.notify && Notification.permission !== "granted" && (await Notification.requestPermission()) !== "granted")
+      return toast({ kind: "Notifications", meta: SEVERITY.WARNING, title: "Notifications were blocked by the browser" });
+    state.notify = !state.notify; store.set("dbm.notify", state.notify);
+    $("notify-btn").setAttribute("aria-pressed", String(state.notify));
+    toast({ kind: "Notifications", meta: SEVERITY.INFO, title: state.notify ? "Desktop notifications on for agent alerts" : "Desktop notifications off" });
+  });
+}
+
+initControls();
+if (typeof Chart === "undefined") { $("banner").classList.add("on"); $("banner").textContent = "Chart library failed to load (static/vendor/chart.umd.min.js)."; }
+loadSnapshot();
+setInterval(poll, POLL_MS);
+setInterval(loadSnapshot, SNAPSHOT_MS);
+setInterval(() => { if (state.alerts.length) renderAlerts(); }, 20000);
+</script>
+</body>
+</html>

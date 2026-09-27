@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Local environment
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+
+# Runtime state
+monitor_state.json
+alerts.jsonl
